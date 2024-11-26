@@ -14,6 +14,7 @@ class Node:
         self.master_id = 0
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind((host, self.port))
+        self.address = f"{host}:{self.port}"
         self.alive = True
 
     def start(self):

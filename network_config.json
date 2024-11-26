@@ -1,0 +1,27 @@
+{
+    "network": {
+        "total_nodes": 3,
+        "base_port": 5000,
+        "default_host": "localhost",
+        "nodes": [
+            {
+                "id": 0,
+                "host": "localhost",
+                "port": 5000,
+                "is_master": true
+            },
+            {
+                "id": 1,
+                "host": "localhost",
+                "port": 5001,
+                "is_master": false
+            },
+            {
+                "id": 2,
+                "host": "192.168.1.100",
+                "port": 5002,
+                "is_master": false
+            }
+        ]
+    }
+}

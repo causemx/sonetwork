@@ -2,6 +2,7 @@
 import sys
 import math
 import random
+import json
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                            QHBoxLayout, QPushButton, QLabel, QStatusBar)
 from PyQt5.QtCore import QTimer
@@ -9,36 +10,37 @@ import networkx as nx
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
-# NetworkNode class definition
 class NetworkNode:
     """
     Represents a node in the network with basic properties and state
     """
-    def __init__(self, node_id, host='localhost', base_port=5000):
+    def __init__(self, node_id, host='localhost', port=None, is_master=False):
         self.id = node_id
         self.host = host
-        self.port = base_port + node_id
-        self.is_master = (node_id == 0)  # First node is initially the master
+        self.port = port
+        self.is_master = is_master
         self.address = f"{host}:{self.port}"
-        self.peers = {}  # Dictionary to store peer connections
-        self.master_id = 0
+        self.peers = {}
+        self.master_id = 0 if is_master else None
         self.is_active = True
 
-# Main Window class
 class NetworkVisualizerWindow(QMainWindow):
     """
     Main window class for the network visualizer application
     """
-    def __init__(self):
+    def __init__(self, config_file='network_config.json'):
         super().__init__()
         # Set window properties
         self.setWindowTitle("Self-Organizing Network Visualizer")
-        self.setGeometry(100, 100, 1400, 900)  # x, y, width, height
+        self.setGeometry(100, 100, 1400, 900)
         
         # Initialize network components
-        self.nodes = {}  # Dictionary to store network nodes
-        self.network_graph = nx.Graph()  # NetworkX graph for visualization
-        self.master_node = 0  # ID of current master node
+        self.nodes = {}
+        self.network_graph = nx.Graph()
+        self.master_node = None
+        
+        # Load network configuration
+        self.config = self._load_config(config_file)
         
         # Calculate static positions for nodes in a circle
         self.node_positions = self._calculate_node_positions()
@@ -52,7 +54,47 @@ class NetworkVisualizerWindow(QMainWindow):
         # Set up update timer for periodic refresh
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self._update_visualization)
-        self.update_timer.start(1000)  # Update every second
+        self.update_timer.start(1000)
+
+    def _load_config(self, config_file):
+        """Load network configuration from JSON file"""
+        try:
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+            return config
+        except Exception as e:
+            print(f"Error loading configuration: {e}")
+            # Provide default configuration if file loading fails
+            return {
+                "network": {
+                    "total_nodes": 3,
+                    "base_port": 5000,
+                    "default_host": "localhost",
+                    "nodes": [
+                        {
+                            "id": 0,
+                            "host": "localhost",
+                            "port": 5000,
+                            "is_master": True
+                        }
+                    ]
+                }
+            }
+
+    def _calculate_node_positions(self):
+        """Calculate positions for nodes in a circle layout"""
+        positions = {}
+        num_nodes = self.config['network']['total_nodes']
+        radius = 0.8
+        center = (1.0, 1.0)
+        
+        for i in range(num_nodes):
+            angle = 2 * math.pi * i / num_nodes
+            x = center[0] + radius * math.cos(angle)
+            y = center[1] + radius * math.sin(angle)
+            positions[i] = (x, y)
+            
+        return positions
 
     def _setup_main_layout(self):
         """Initialize the main window layout"""
@@ -73,22 +115,6 @@ class NetworkVisualizerWindow(QMainWindow):
         # Add status bar
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
-
-    def _calculate_node_positions(self):
-        """Calculate positions for nodes in a circle layout"""
-        positions = {}
-        num_nodes = 10
-        radius = 0.8  # Circle radius
-        center = (1.0, 1.0)  # Center point
-        
-        for i in range(num_nodes):
-            # Calculate angle and position for each node
-            angle = 2 * math.pi * i / num_nodes
-            x = center[0] + radius * math.cos(angle)
-            y = center[1] + radius * math.sin(angle)
-            positions[i] = (x, y)
-            
-        return positions
 
     def _create_control_panel(self):
         """Create the control panel with network information and controls"""
@@ -116,7 +142,6 @@ class NetworkVisualizerWindow(QMainWindow):
         status_group = QWidget()
         status_layout = QVBoxLayout(status_group)
         
-        # Add title
         title_label = QLabel("Network Status")
         title_label.setStyleSheet("""
             font-weight: bold;
@@ -127,9 +152,8 @@ class NetworkVisualizerWindow(QMainWindow):
         """)
         status_layout.addWidget(title_label)
         
-        # Add status labels
-        self.master_label = QLabel("Master: localhost:5000")
-        self.active_nodes_label = QLabel("Active Nodes: 10")
+        self.master_label = QLabel("Master: Not Selected")
+        self.active_nodes_label = QLabel("Active Nodes: 0")
         status_layout.addWidget(self.master_label)
         status_layout.addWidget(self.active_nodes_label)
         layout.addWidget(status_group)
@@ -164,7 +188,6 @@ class NetworkVisualizerWindow(QMainWindow):
         buttons_group = QWidget()
         buttons_layout = QVBoxLayout(buttons_group)
         
-        # Add title
         controls_label = QLabel("Controls")
         controls_label.setStyleSheet("""
             font-weight: bold;
@@ -175,7 +198,6 @@ class NetworkVisualizerWindow(QMainWindow):
         """)
         buttons_layout.addWidget(controls_label)
         
-        # Button style
         button_style = """
             QPushButton {
                 background-color: #f8f9fa;
@@ -194,7 +216,6 @@ class NetworkVisualizerWindow(QMainWindow):
             }
         """
         
-        # Create and add buttons
         kill_master_btn = QPushButton("Kill Master Node")
         kill_random_btn = QPushButton("Kill Random Node")
         restore_btn = QPushButton("Restore Network")
@@ -236,17 +257,30 @@ class NetworkVisualizerWindow(QMainWindow):
         layout.addWidget(legend_group)
 
     def _setup_network(self):
-        """Initialize the network with nodes and connections"""
-        # Create nodes
-        for i in range(10):
-            node = NetworkNode(i)
-            self.nodes[i] = node
-            self.network_graph.add_node(i)
+        """Initialize the network with nodes and connections from config"""
+        # Clear existing network
+        self.nodes.clear()
+        self.network_graph.clear()
+        
+        # Create nodes from configuration
+        for node_config in self.config['network']['nodes']:
+            node = NetworkNode(
+                node_id=node_config['id'],
+                host=node_config['host'],
+                port=node_config['port'],
+                is_master=node_config['is_master']
+            )
+            self.nodes[node.id] = node
+            self.network_graph.add_node(node.id)
+            
+            if node.is_master:
+                self.master_node = node.id
         
         # Create edges (fully connected network)
-        for i in range(10):
-            for j in range(i + 1, 10):
-                self.network_graph.add_edge(i, j)
+        node_ids = list(self.nodes.keys())
+        for i in range(len(node_ids)):
+            for j in range(i + 1, len(node_ids)):
+                self.network_graph.add_edge(node_ids[i], node_ids[j])
         
         self._update_visualization()
 
@@ -260,10 +294,10 @@ class NetworkVisualizerWindow(QMainWindow):
         for node_id in self.network_graph.nodes():
             if node_id == self.master_node:
                 node_colors.append('red')
-                node_sizes.append(2000)  # Larger size for master
+                node_sizes.append(2000)
             else:
                 node_colors.append('lightblue')
-                node_sizes.append(1500)  # Normal size for slaves
+                node_sizes.append(1500)
         
         # Draw nodes
         nx.draw_networkx_nodes(self.network_graph, 
@@ -301,6 +335,8 @@ class NetworkVisualizerWindow(QMainWindow):
         master_node = next((node for node in self.nodes.values() if node.is_master), None)
         if master_node:
             self.master_label.setText(f"Master: {master_node.address}")
+        else:
+            self.master_label.setText("Master: Not Selected")
         
         # Update active nodes count
         self.active_nodes_label.setText(f"Active Nodes: {len(self.nodes)}")
@@ -349,8 +385,6 @@ class NetworkVisualizerWindow(QMainWindow):
 
     def _restore_network(self):
         """Handler for Restore Network button"""
-        self.nodes.clear()
-        self.network_graph.clear()
         self._setup_network()
         self.statusBar.showMessage("Network restored")
 
@@ -358,10 +392,9 @@ class NetworkVisualizerWindow(QMainWindow):
         """Handle application close event"""
         super().closeEvent(event)
 
-# Main application entry point
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setStyle('Fusion')  # Use Fusion style for modern look
-    window = NetworkVisualizerWindow()
+    app.setStyle('Fusion')
+    window = NetworkVisualizerWindow('network_config.json')
     window.show()
     sys.exit(app.exec_())
