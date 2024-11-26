@@ -3,6 +3,7 @@ import sys
 import math
 import random
 import json
+import re
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                            QHBoxLayout, QPushButton, QLabel, QStatusBar)
 from PyQt5.QtCore import QTimer
@@ -14,15 +15,20 @@ class NetworkNode:
     """
     Represents a node in the network with basic properties and state
     """
-    def __init__(self, node_id, host='localhost', port=None, is_master=False):
-        self.id = node_id
+    def __init__(self, host='localhost', port=None, is_master=False):
         self.host = host
         self.port = port
         self.is_master = is_master
         self.address = f"{host}:{self.port}"
         self.peers = {}
-        self.master_id = 0 if is_master else None
         self.is_active = True
+        # Calculate ID based on sum of numerical values in host
+        self.id = self._calculate_host_id(host)
+    
+    def _calculate_host_id(self, host):
+        """Calculate node ID based on sum of numerical values in host address"""
+        numbers = re.findall(r'\d+', host)
+        return sum(int(num) for num in numbers) if numbers else 0
 
 class NetworkVisualizerWindow(QMainWindow):
     """
@@ -43,7 +49,7 @@ class NetworkVisualizerWindow(QMainWindow):
         self.config = self._load_config(config_file)
         
         # Calculate static positions for nodes in a circle
-        self.node_positions = self._calculate_node_positions()
+        self.node_positions = None  # Will be calculated after nodes are created
         
         # Set up the main window layout
         self._setup_main_layout()
@@ -72,7 +78,6 @@ class NetworkVisualizerWindow(QMainWindow):
                     "default_host": "localhost",
                     "nodes": [
                         {
-                            "id": 0,
                             "host": "localhost",
                             "port": 5000,
                             "is_master": True
@@ -84,15 +89,18 @@ class NetworkVisualizerWindow(QMainWindow):
     def _calculate_node_positions(self):
         """Calculate positions for nodes in a circle layout"""
         positions = {}
-        num_nodes = self.config['network']['total_nodes']
+        num_nodes = len(self.nodes)
         radius = 0.8
         center = (1.0, 1.0)
         
-        for i in range(num_nodes):
+        # Sort node IDs to ensure consistent positioning
+        sorted_ids = sorted(self.nodes.keys())
+        
+        for i, node_id in enumerate(sorted_ids):
             angle = 2 * math.pi * i / num_nodes
             x = center[0] + radius * math.cos(angle)
             y = center[1] + radius * math.sin(angle)
-            positions[i] = (x, y)
+            positions[node_id] = (x, y)
             
         return positions
 
@@ -265,7 +273,6 @@ class NetworkVisualizerWindow(QMainWindow):
         # Create nodes from configuration
         for node_config in self.config['network']['nodes']:
             node = NetworkNode(
-                node_id=node_config['id'],
                 host=node_config['host'],
                 port=node_config['port'],
                 is_master=node_config['is_master']
@@ -275,6 +282,9 @@ class NetworkVisualizerWindow(QMainWindow):
             
             if node.is_master:
                 self.master_node = node.id
+        
+        # Calculate node positions after creating nodes
+        self.node_positions = self._calculate_node_positions()
         
         # Create edges (fully connected network)
         node_ids = list(self.nodes.keys())
@@ -287,6 +297,9 @@ class NetworkVisualizerWindow(QMainWindow):
     def _update_visualization(self):
         """Update the network visualization and status information"""
         self.ax.clear()
+        
+        if not self.nodes:
+            return
         
         # Prepare node visualization properties
         node_colors = []
@@ -312,8 +325,8 @@ class NetworkVisualizerWindow(QMainWindow):
                              alpha=0.3,
                              width=0.5)
         
-        # Draw labels with IP:Port
-        labels = {node_id: f"{self.nodes[node_id].address}" 
+        # Draw labels with IP:Port and ID
+        labels = {node_id: f"{self.nodes[node_id].address}\n(ID: {node_id})" 
                  for node_id in self.network_graph.nodes()}
         nx.draw_networkx_labels(self.network_graph, 
                               self.node_positions,
@@ -334,7 +347,7 @@ class NetworkVisualizerWindow(QMainWindow):
         # Update master info
         master_node = next((node for node in self.nodes.values() if node.is_master), None)
         if master_node:
-            self.master_label.setText(f"Master: {master_node.address}")
+            self.master_label.setText(f"Master: {master_node.address} (ID: {master_node.id})")
         else:
             self.master_label.setText("Master: Not Selected")
         
@@ -345,7 +358,7 @@ class NetworkVisualizerWindow(QMainWindow):
         nodes_text = ""
         for node in sorted(self.nodes.values(), key=lambda x: x.port):
             status = "Master" if node.is_master else "Slave"
-            nodes_text += f"{node.address} ({status})\n"
+            nodes_text += f"{node.address} (ID: {node.id}, {status})\n"
         self.nodes_list.setText(nodes_text)
 
     def _kill_master_node(self):
@@ -382,6 +395,9 @@ class NetworkVisualizerWindow(QMainWindow):
                             node.is_master = True
                         else:
                             node.is_master = False
+            
+            # Recalculate node positions after removing a node
+            self.node_positions = self._calculate_node_positions()
 
     def _restore_network(self):
         """Handler for Restore Network button"""

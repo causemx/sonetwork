@@ -1,25 +1,67 @@
 {
     "network": {
-        "total_nodes": 3,
+        "total_nodes": 10,
         "base_port": 5000,
         "default_host": "localhost",
         "nodes": [
             {
                 "id": 0,
-                "host": "localhost",
+                "host": "192.168.1.1",
                 "port": 5000,
                 "is_master": true
             },
             {
                 "id": 1,
-                "host": "localhost",
-                "port": 5001,
+                "host": "192.168.1.2",
+                "port": 5000,
                 "is_master": false
             },
             {
                 "id": 2,
-                "host": "192.168.1.100",
-                "port": 5002,
+                "host": "192.168.1.3",
+                "port": 5000,
+                "is_master": false
+            },
+            {
+                "id": 3,
+                "host": "192.168.1.4",
+                "port": 5000,
+                "is_master": false
+            },
+            {
+                "id": 4,
+                "host": "192.168.1.5",
+                "port": 5000,
+                "is_master": false
+            },
+            {
+                "id": 5,
+                "host": "192.168.1.6",
+                "port": 5000,
+                "is_master": false
+            },
+            {
+                "id": 6,
+                "host": "192.168.1.7",
+                "port": 5000,
+                "is_master": false
+            },
+            {
+                "id": 7,
+                "host": "192.168.1.8",
+                "port": 5000,
+                "is_master": false
+            },
+            {
+                "id": 8,
+                "host": "192.168.1.9",
+                "port": 5000,
+                "is_master": false
+            },
+            {
+                "id": 9,
+                "host": "192.168.1.10",
+                "port": 5000,
                 "is_master": false
             }
         ]
