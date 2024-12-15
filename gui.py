@@ -1,6 +1,5 @@
 # Import required libraries
 import sys
-import math
 import random
 import json
 import re
@@ -9,6 +8,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt5.QtCore import QTimer
 import networkx as nx
 import matplotlib.pyplot as plt
+from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
 class NetworkNode:
@@ -39,6 +39,16 @@ class NetworkVisualizerWindow(QMainWindow):
         # Set window properties
         self.setWindowTitle("Self-Organizing Network Visualizer")
         self.setGeometry(100, 100, 1400, 900)
+
+        # Load drone images
+        try:
+            self.leader_img = plt.imread('drone_leader.png')
+            self.follower_img = plt.imread('drone_follower.png')
+        except Exception as e:
+            print(f"Error loading drone images: {e}")
+            # Fallback to simple shapes if images can't be loaded
+            self.leader_img = None
+            self.follower_img = None
         
         # Initialize network components
         self.nodes = {}
@@ -70,44 +80,78 @@ class NetworkVisualizerWindow(QMainWindow):
             return config
         except Exception as e:
             print(f"Error loading configuration: {e}")
-            # Provide default configuration if file loading fails
-            return {
-                "network": {
-                    "total_nodes": 3,
-                    "base_port": 5000,
-                    "default_host": "localhost",
-                    "nodes": [
-                        {
-                            "host": "localhost",
-                            "port": 5000,
-                            "is_master": True
-                        }
-                    ]
-                }
-            }
+
+    def _calculate_pyramid_layers(self, num_nodes):
+        """Calculate how many nodes should be in each layer of the pyramid"""
+        layers = []
+        nodes_left = num_nodes - 1  # Excluding master node
+        current_layer = 1
+        
+        while nodes_left > 0:
+            nodes_in_layer = min(current_layer * 2 - 1, nodes_left)
+            layers.append(nodes_in_layer)
+            nodes_left -= nodes_in_layer
+            current_layer += 1
+            
+        return layers
 
     def _calculate_node_positions(self):
-        """Calculate positions for nodes in a circle layout"""
+        """Calculate positions for nodes in a pyramid layout"""
         positions = {}
         num_nodes = len(self.nodes)
-        radius = 0.8
-        center = (1.0, 1.0)
         
-        # Sort node IDs to ensure consistent positioning
-        sorted_ids = sorted(self.nodes.keys())
+        if num_nodes == 0:
+            return positions
         
-        for i, node_id in enumerate(sorted_ids):
-            angle = 2 * math.pi * i / num_nodes
-            x = center[0] + radius * math.cos(angle)
-            y = center[1] + radius * math.sin(angle)
-            positions[node_id] = (x, y)
+        # Center point and size of the pyramid
+        center_x, center_y = 1.0, 1.0
+        pyramid_height = 0.8
+        max_width = 1.2
+        
+        # Position master node at the top
+        positions[self.master_node] = (center_x, center_y + pyramid_height/2)
+        
+        # Get follower nodes
+        follower_nodes = [node_id for node_id in sorted(self.nodes.keys()) if node_id != self.master_node]
+        
+        if not follower_nodes:
+            return positions
             
+        # Calculate pyramid layers
+        layers = self._calculate_pyramid_layers(len(self.nodes))
+        total_layers = len(layers)
+        
+        # Calculate vertical spacing between layers
+        layer_height = pyramid_height / (total_layers)
+        
+        # Position follower nodes in pyramid layers
+        current_node_idx = 0
+        for layer_idx, nodes_in_layer in enumerate(layers):
+            # Calculate y position for this layer
+            y = center_y + pyramid_height/2 - (layer_idx + 1) * layer_height
+            
+            # Calculate horizontal spacing for this layer
+            if nodes_in_layer == 1:
+                x_positions = [center_x]
+            else:
+                layer_width = max_width * (layer_idx + 1) / total_layers
+                x_start = center_x - layer_width/2
+                x_step = layer_width / (nodes_in_layer - 1) if nodes_in_layer > 1 else 0
+                x_positions = [x_start + i * x_step for i in range(nodes_in_layer)]
+            
+            # Position nodes in this layer
+            for i in range(nodes_in_layer):
+                if current_node_idx < len(follower_nodes):
+                    positions[follower_nodes[current_node_idx]] = (x_positions[i], y)
+                    current_node_idx += 1
+        
         return positions
 
     def _setup_main_layout(self):
         """Initialize the main window layout"""
         # Create main widget and layout
         main_widget = QWidget()
+        main_widget.setStyleSheet("background-color: white;")
         self.setCentralWidget(main_widget)
         layout = QHBoxLayout(main_widget)
         
@@ -162,6 +206,8 @@ class NetworkVisualizerWindow(QMainWindow):
         
         self.master_label = QLabel("Master: Not Selected")
         self.active_nodes_label = QLabel("Active Nodes: 0")
+        self.master_label.setStyleSheet("color: black;")
+        self.active_nodes_label.setStyleSheet("color: black;")
         status_layout.addWidget(self.master_label)
         status_layout.addWidget(self.active_nodes_label)
         layout.addWidget(status_group)
@@ -187,6 +233,7 @@ class NetworkVisualizerWindow(QMainWindow):
             background-color: white;
             border: 1px solid #ddd;
             border-radius: 5px;
+            color: black;
         """)
         nodes_layout.addWidget(self.nodes_list)
         layout.addWidget(nodes_group)
@@ -203,6 +250,7 @@ class NetworkVisualizerWindow(QMainWindow):
             padding: 5px;
             background-color: #f0f0f0;
             border-radius: 5px;
+            color: black;
         """)
         buttons_layout.addWidget(controls_label)
         
@@ -295,46 +343,51 @@ class NetworkVisualizerWindow(QMainWindow):
         self._update_visualization()
 
     def _update_visualization(self):
-        """Update the network visualization and status information"""
+        """Update the network visualization with drone icons and labels below"""
         self.ax.clear()
         
         if not self.nodes:
             return
         
-        # Prepare node visualization properties
-        node_colors = []
-        node_sizes = []
-        for node_id in self.network_graph.nodes():
-            if node_id == self.master_node:
-                node_colors.append('red')
-                node_sizes.append(2000)
-            else:
-                node_colors.append('lightblue')
-                node_sizes.append(1500)
-        
-        # Draw nodes
-        nx.draw_networkx_nodes(self.network_graph, 
-                             self.node_positions,
-                             node_color=node_colors,
-                             node_size=node_sizes)
-        
-        # Draw edges
+        # Draw edges first (underneath nodes)
         nx.draw_networkx_edges(self.network_graph, 
                              self.node_positions,
                              edge_color='gray',
                              alpha=0.3,
                              width=0.5)
         
-        # Draw labels with IP:Port and ID
-        labels = {node_id: f"{self.nodes[node_id].address}\n(ID: {node_id})" 
-                 for node_id in self.network_graph.nodes()}
-        nx.draw_networkx_labels(self.network_graph, 
-                              self.node_positions,
-                              labels,
-                              font_size=8)
+        # Draw nodes with drone icons and labels
+        for node_id in self.network_graph.nodes():
+            pos = self.node_positions[node_id]
+            is_master = node_id == self.master_node
+            
+            # Draw the icon
+            if self.leader_img is not None and self.follower_img is not None:
+                img = self.leader_img if is_master else self.follower_img
+                imagebox = OffsetImage(img, zoom=0.15)
+                ab = AnnotationBbox(imagebox, pos,
+                                  frameon=False,
+                                  pad=0)
+                self.ax.add_artist(ab)
+            else:
+                # Fallback to circles if images aren't available
+                node_color = 'red' if is_master else 'lightblue'
+                nx.draw_networkx_nodes(self.network_graph,
+                                     {node_id: pos},
+                                     nodelist=[node_id],
+                                     node_color=node_color,
+                                     node_size=2000 if is_master else 1500)
+            
+            # Add label below the icon
+            label_text = f"{self.nodes[node_id].address}\n(ID: {node_id})"
+            label_y_offset = -0.15  # Adjust this value to move labels up or down
+            self.ax.text(pos[0], pos[1] + label_y_offset, label_text,
+                        horizontalalignment='center',
+                        verticalalignment='top',
+                        fontsize=8)
         
         # Set visualization properties
-        self.ax.set_title("Network Topology", pad=20, fontsize=14)
+        self.ax.set_title("Drone Network Topology", pad=20, fontsize=14)
         self.ax.set_xlim(0, 2)
         self.ax.set_ylim(0, 2)
         self.canvas.draw()
