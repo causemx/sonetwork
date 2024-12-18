@@ -18,6 +18,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from network_monitor import NetworkMonitor
 from network_node import NetworkNode
 
 
@@ -49,6 +50,11 @@ class NetworkVisualizerWindow(QMainWindow):
 
         # Load network configuration
         self.config = self._load_config(config_file)
+
+        # Initialize network monitor
+        self.network_monitor = NetworkMonitor(self.config["network"]["base_port"])
+        self.network_monitor.signals.connection_changed.connect(self._handle_connection_change)
+        self.network_monitor.signals.monitoring_update.connect(self._handle_monitoring_update)
 
         # Calculate static positions for nodes in a circle
         self.node_positions = None  # Will be calculated after nodes are created
@@ -160,6 +166,9 @@ class NetworkVisualizerWindow(QMainWindow):
         # Add Legend section
         self._add_legend_section(layout)
 
+        # Add new monitor stats section
+        self._add_network_monitor_section(layout)
+
         layout.addStretch()
         return panel
 
@@ -212,6 +221,42 @@ class NetworkVisualizerWindow(QMainWindow):
         nodes_layout.addWidget(self.nodes_list)
         layout.addWidget(nodes_group)
 
+    def _add_network_monitor_section(self, layout):
+        """Add section showing network monitor statistics"""
+        monitor_group = QWidget()
+        monitor_layout = QVBoxLayout(monitor_group)
+
+        # Title
+        monitor_title = QLabel("Network Monitor Stats")
+        monitor_title.setStyleSheet("""
+            font-weight: bold;
+            font-size: 14px;
+            padding: 5px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        """)
+        monitor_layout.addWidget(monitor_title)
+
+        # Stats labels
+        self.total_connections_label = QLabel("Total Connections: 0")
+        self.master_connections_label = QLabel("Master Connections: 0")
+        self.last_update_label = QLabel("Last Update: Never")
+
+        # Style the labels
+        stats_style = """
+            padding: 5px;
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            color: black;
+            margin: 2px;
+        """
+        for label in [self.total_connections_label, self.master_connections_label, self.last_update_label]:
+            label.setStyleSheet(stats_style)
+            monitor_layout.addWidget(label)
+
+        layout.addWidget(monitor_group)
+
     def _add_control_buttons(self, layout):
         """Add control buttons section"""
         buttons_group = QWidget()
@@ -248,7 +293,9 @@ class NetworkVisualizerWindow(QMainWindow):
 
         kill_master_btn = QPushButton("Kill Master Node")
         kill_random_btn = QPushButton("Kill Random Node")
+        kill_random_btn.setEnabled(False)
         restore_btn = QPushButton("Restore Network")
+        restore_btn.setEnabled(False)
 
         for btn in [kill_master_btn, kill_random_btn, restore_btn]:
             btn.setStyleSheet(button_style)
@@ -330,6 +377,11 @@ class NetworkVisualizerWindow(QMainWindow):
             except Exception as e:
                 print(f"Error creating node: {e}")
                 continue
+        
+        # After creating all nodes
+        node_dict = {node.id: (node.host, node.port) for node in self.nodes.values()}
+        self.network_monitor.stop_monitoring()  # Stop existing monitoring if any
+        self.network_monitor.start_monitoring(node_dict)
 
         # Calculate node positions after creating nodes
         self.node_positions = self._calculate_node_positions()
@@ -347,10 +399,23 @@ class NetworkVisualizerWindow(QMainWindow):
                 distance = ((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2)**0.5
                 
                 # Add edge if nodes are close enough (adjacent in grid)
-                if distance < 0.5:  # Adjust this threshold as needed
+                if distance < 1:  # Adjust this threshold as needed
                     self.network_graph.add_edge(node1_id, node2_id)
 
         self._update_visualization()
+
+    def _handle_connection_change(self, connection_data):
+        node1_id, node2_id, is_connected = connection_data
+        if is_connected:
+            self.network_graph.add_edge(node1_id, node2_id)
+        else:
+            if self.network_graph.has_edge(node1_id, node2_id):
+                self.network_graph.remove_edge(node1_id, node2_id)
+        self._update_visualization()
+
+    def _handle_monitoring_update(self, timestamp):
+        """Update the last monitoring timestamp"""
+        self.last_update_label.setText(f"Last Update: {timestamp}")
 
     def _update_visualization(self):
         """Update the network visualization with drone icons and labels below"""
@@ -392,7 +457,7 @@ class NetworkVisualizerWindow(QMainWindow):
 
             # Add label below the icon
             label_text = f"{self.nodes[node_id].address}\n(ID: {node_id})"
-            label_y_offset = -0.15  # Adjust this value to move labels up or down
+            label_y_offset = -0.05  # Adjust this value to move labels up or down
             self.ax.text(
                 pos[0],
                 pos[1] + label_y_offset,
@@ -406,10 +471,23 @@ class NetworkVisualizerWindow(QMainWindow):
         self.ax.set_title("Drone Network Topology", pad=20, fontsize=14)
         self.ax.set_xlim(0, 2)
         self.ax.set_ylim(0, 2)
+
+
+        # Update monitor statistics
+        total_connections = len(self.network_graph.edges())
+        master_connections = len([edge for edge in self.network_graph.edges() 
+                                if self.master_node in edge]) if self.master_node is not None else 0
+        
+        self.total_connections_label.setText(f"Total Connections: {total_connections}")
+        self.master_connections_label.setText(f"Master Connections: {master_connections}")
+        self.last_update_label.setText(f"Last Update: {time.strftime('%H:%M:%S')}")
+
+
         self.canvas.draw()
 
         # Update status information
         self._update_status_info()
+
 
     def _update_status_info(self):
         """Update status labels and node list"""
@@ -504,6 +582,9 @@ class NetworkVisualizerWindow(QMainWindow):
             if hasattr(node, "stop"):
                 node._cleanup_in_progress = True
                 node.stop()
+        
+        self.network_monitor.stop_monitoring()
+
         super().closeEvent(event)
 
 

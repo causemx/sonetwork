@@ -96,6 +96,15 @@ class NetworkNode:
         """Handle received network messages"""
         msg_type = message.get('type')
 
+        if msg_type == 'connection_test':
+        # Send response back for connection testing
+            response = {
+                'type': 'connection_test_response',
+                'from_id': self.id,
+                'timestamp': time.time()
+            }
+            self.socket.sendto(json.dumps(response).encode(), addr)
+
         if msg_type == 'heartbeat':
             if not self.is_master:
                 self.last_heartbeat = time.time()
